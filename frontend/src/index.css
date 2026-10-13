@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --raised: #eef0f7;
+  --line: #e2e5ef;
+  --ink: #1c2130;
+  --muted: #6b7280;
+  --primary: #6366f1;
+  --primary-ink: #ffffff;
+  --danger: #ef4444;
+  --success: #10b981;
+}
+
+.dark {
+  --bg: #12141c;
+  --surface: #1b1f2b;
+  --raised: #242938;
+  --line: #2e3444;
+  --ink: #e7eaf3;
+  --muted: #9aa2b5;
+  --primary: #818cf8;
+  --primary-ink: #101223;
+  --danger: #f87171;
+  --success: #34d399;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+/* 键盘可访问性：焦点环 */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* 日期砖块图色阶（浅/深主题各一套） */
+.hm-l1 { background-color: color-mix(in srgb, var(--primary) 25%, var(--surface)); }
+.hm-l2 { background-color: color-mix(in srgb, var(--primary) 45%, var(--surface)); }
+.hm-l3 { background-color: color-mix(in srgb, var(--primary) 65%, var(--surface)); }
+.hm-l4 { background-color: color-mix(in srgb, var(--primary) 85%, var(--surface)); }

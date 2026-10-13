@@ -1,0 +1,38 @@
+# dependencies
+node_modules/
+frontend/node_modules/
+
+# build output
+frontend/dist/
+frontend/dev-dist/
+backend/wordtile-server
+backend/bin/
+
+# env
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# local assistant data
+.workbuddy/
+.gotoolchain/
+
+# test coverage
+coverage/
+
+# local temp
+tmp/
+*.local
+
+# vite temp
+*.timestamp-*.mjs

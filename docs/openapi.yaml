@@ -1,0 +1,850 @@
+openapi: 3.0.3
+info:
+  title: WordTile API
+  description: |
+    WordTile 单词匹配学习应用后端接口。
+    - JSON 字段一律 snake_case；单对象响应均有包装（{"deck": ...} 等）。
+    - 除 /auth/*、/marketplace/decks、/healthz 外均需 Bearer Token。
+    - 认证接口全局限流 20 次/分钟/IP。
+    - 游戏判定在服务端完成：客户端只持有随机 token，不知道 term↔definition 映射。
+  version: 1.0.0
+servers:
+  - url: http://localhost:9000/api/v1
+tags:
+  - name: auth
+  - name: users
+  - name: decks
+  - name: community
+  - name: version
+  - name: games
+  - name: stats
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        email: { type: string }
+        display_name: { type: string }
+        avatar_url: { type: string }
+        theme_preference: { type: string, enum: [light, dark, system] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Deck:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        visibility: { type: string, enum: [public, private] }
+        head_commit_id: { type: string, format: uuid, nullable: true }
+        forked_from: { type: string, format: uuid, nullable: true }
+        likes_count: { type: integer }
+        forks_count: { type: integer }
+        entry_count: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    DeckDetail:
+      allOf:
+        - $ref: '#/components/schemas/Deck'
+        - type: object
+          properties:
+            entries:
+              type: array
+              items: { $ref: '#/components/schemas/Entry' }
+            origin_head: { type: string, nullable: true, description: 若是 fork，源题库当前 HEAD commit hash }
+            open_conflicts: { type: integer, description: 未解决冲突数 }
+            pending_merge_source: { type: string, format: uuid, nullable: true }
+    Entry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        deck_id: { type: string, format: uuid }
+        logical_id: { type: string, format: uuid, description: 跨题库稳定 ID（fork 保留），三路合并以它为键 }
+        term: { type: string }
+        definition: { type: string }
+        tags: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Commit:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        deck_id: { type: string, format: uuid }
+        hash: { type: string }
+        seq: { type: integer }
+        parent_hashes: { type: array, items: { type: string } }
+        message: { type: string }
+        author_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+    EntrySnapshot:
+      type: object
+      properties:
+        exists: { type: boolean }
+        term: { type: string }
+        definition: { type: string }
+        tags: { type: array, items: { type: string } }
+    Conflict:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        deck_id: { type: string, format: uuid }
+        logical_id: { type: string, format: uuid }
+        base: { $ref: '#/components/schemas/EntrySnapshot' }
+        ours: { $ref: '#/components/schemas/EntrySnapshot' }
+        theirs: { $ref: '#/components/schemas/EntrySnapshot' }
+        created_at: { type: string, format: date-time }
+    Comment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        deck_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        content: { type: string }
+        created_at: { type: string, format: date-time }
+    Tile:
+      type: object
+      properties:
+        token: { type: string, description: 服务端随机发放，判定用 }
+        text: { type: string }
+    GameSession:
+      type: object
+      properties:
+        session_id: { type: string, format: uuid }
+        mode: { type: string, enum: [custom, campaign] }
+        level: { type: integer }
+        deck_id: { type: string, format: uuid }
+        block_count: { type: integer }
+        correct_count: { type: integer }
+        wrong_count: { type: integer }
+        matched_count: { type: integer }
+        terms:
+          type: array
+          items: { $ref: '#/components/schemas/Tile' }
+        definitions:
+          type: array
+          items: { $ref: '#/components/schemas/Tile' }
+
+  responses:
+    Error401:
+      description: 未认证或 token 过期
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: 注册
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, email, password]
+              properties:
+                username: { type: string, minLength: 3, maxLength: 32 }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 6 }
+                display_name: { type: string }
+      responses:
+        '201':
+          description: 注册成功并返回令牌
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+                  access_token: { type: string }
+                  refresh_token: { type: string }
+        '400': { description: 参数不合法 }
+        '409': { description: 用户名或邮箱已存在 }
+        '429': { description: 限流 }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: 登录（identifier 为用户名或邮箱）
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identifier, password]
+              properties:
+                identifier: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: 登录成功（access 15min / refresh 7d）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+                  access_token: { type: string }
+                  refresh_token: { type: string }
+        '401': { description: 用户名或密码错误 }
+        '429': { description: 限流 }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: 刷新令牌
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: 新令牌对
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  refresh_token: { type: string }
+        '401': { description: refresh_token 无效 }
+
+  /users/me:
+    get:
+      tags: [users]
+      summary: 当前用户信息
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Error401' }
+    patch:
+      tags: [users]
+      summary: 更新资料（display_name / avatar_url / theme_preference）
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string }
+                avatar_url: { type: string }
+                theme_preference: { type: string, enum: [light, dark, system] }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+
+  /decks:
+    get:
+      tags: [decks]
+      summary: 我的题库列表
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  decks:
+                    type: array
+                    items: { $ref: '#/components/schemas/Deck' }
+    post:
+      tags: [decks]
+      summary: 新建题库
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                description: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deck: { $ref: '#/components/schemas/Deck' }
+
+  /decks/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [decks]
+      summary: 题库详情（含词条、origin_head、open_conflicts）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeckDetail' }
+        '404': { description: 不存在 }
+    patch:
+      tags: [decks]
+      summary: 更新题库
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+                visibility: { type: string, enum: [public, private] }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deck: { $ref: '#/components/schemas/Deck' }
+    delete:
+      tags: [decks]
+      summary: 删除题库
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: boolean }
+
+  /decks/{id}/entries:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [decks]
+      summary: 词条列表
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: '#/components/schemas/Entry' }
+    post:
+      tags: [decks]
+      summary: 新增词条
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [term, definition]
+              properties:
+                term: { type: string }
+                definition: { type: string }
+                tags: { type: array, items: { type: string } }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entry: { $ref: '#/components/schemas/Entry' }
+
+  /entries/{entryId}:
+    parameters:
+      - { name: entryId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      tags: [decks]
+      summary: 修改词条（PRD 规定的顶层路径）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                term: { type: string }
+                definition: { type: string }
+                tags: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entry: { $ref: '#/components/schemas/Entry' }
+        '404': { description: 不存在 }
+    delete:
+      tags: [decks]
+      summary: 删除词条
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: boolean }
+
+  /marketplace/decks:
+    get:
+      tags: [community]
+      summary: 公开题库市场（无需登录，Redis 缓存）
+      security: []
+      parameters:
+        - { name: search, in: query, schema: { type: string }, description: 按名称/描述搜索 }
+        - { name: sort, in: query, schema: { type: string, enum: [new, likes, forks] }, description: 默认 new }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  decks:
+                    type: array
+                    items: { $ref: '#/components/schemas/Deck' }
+
+  /decks/{id}/publish:
+    post:
+      tags: [community]
+      summary: 发布/取消发布（visibility 切换）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deck: { $ref: '#/components/schemas/Deck' }
+
+  /decks/{id}/fork:
+    post:
+      tags: [community]
+      summary: Fork 题库（复制词条保留 logical_id + 复制 commit 历史）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '201':
+          description: Fork 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deck: { $ref: '#/components/schemas/Deck' }
+
+  /decks/{id}/like:
+    post:
+      tags: [community]
+      summary: 点赞/取消点赞（幂等切换）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  liked: { type: boolean }
+                  likes_count: { type: integer }
+
+  /decks/{id}/comments:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [community]
+      summary: 评论列表
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comments:
+                    type: array
+                    items: { $ref: '#/components/schemas/Comment' }
+    post:
+      tags: [community]
+      summary: 发表评论
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string, maxLength: 500 }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comment: { $ref: '#/components/schemas/Comment' }
+
+  /decks/{id}/commits:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [version]
+      summary: 提交历史（按 seq 排序）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  commits:
+                    type: array
+                    items: { $ref: '#/components/schemas/Commit' }
+    post:
+      tags: [version]
+      summary: 创建 commit（对当前全量词条做快照 diff）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message: { type: string, maxLength: 200 }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  commit: { $ref: '#/components/schemas/Commit' }
+
+  /decks/{id}/merge:
+    post:
+      tags: [version]
+      summary: 从源题库 Pull 合并（三路合并，LCA 为最近共同祖先）
+      description: |
+        自动可合并部分立即写入工作区并生成变更 commit；
+        冲突写入 conflicts 表等待解决；
+        全部冲突解决后自动生成双父 merge commit。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source_deck_id: { type: string, format: uuid, description: 不传则使用 deck.forked_from }
+                source_commit_id: { type: string, description: 不传则使用源题库 HEAD }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [already_up_to_date, pending_conflicts, merged] }
+                  merged_count: { type: integer, description: 自动应用的变更数 }
+                  conflicts: { type: integer, description: 冲突数量 }
+                  conflict_list:
+                    type: array
+                    items: { $ref: '#/components/schemas/Conflict' }
+
+  /decks/{id}/conflicts:
+    get:
+      tags: [version]
+      summary: 冲突列表
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [open, resolved, all] }, description: 默认 open }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conflicts:
+                    type: array
+                    items: { $ref: '#/components/schemas/Conflict' }
+
+  /decks/{id}/conflicts/resolve:
+    post:
+      tags: [version]
+      summary: 解决单个冲突；全部解决后自动生成双父 merge commit
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [conflict_id, resolution]
+              properties:
+                conflict_id: { type: string, format: uuid }
+                resolution: { type: string, enum: [ours, theirs, custom] }
+                custom:
+                  $ref: '#/components/schemas/EntrySnapshot'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resolved: { type: boolean }
+                  remaining: { type: integer, description: 剩余未解决冲突数 }
+                  auto_committed: { type: boolean, description: 全部解决时自动生成双父 merge commit }
+                  status: { type: string, enum: [resolved_one, resolved_all] }
+
+  /games/start:
+    post:
+      tags: [games]
+      summary: 开始一局（服务端发放随机 token，防作弊）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deck_id, mode]
+              properties:
+                deck_id: { type: string, format: uuid }
+                mode: { type: string, enum: [custom, campaign] }
+                block_count: { type: integer, minimum: 2, maximum: 30, description: 自定义模式的块数（PRD 10~50 块，即 5~25 对） }
+                level: { type: integer, description: 闯关模式关卡号 }
+                tags: { type: array, items: { type: string }, description: 标签筛选 }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GameSession' }
+        '400': { description: 词条不足等 }
+
+  /games/{id}:
+    get:
+      tags: [games]
+      summary: 获取会话状态
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GameSession' }
+        '404': { description: 不存在 }
+
+  /games/{id}/match:
+    post:
+      tags: [games]
+      summary: 匹配判定（服务端判定 token 对应关系）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [term_token, definition_token]
+              properties:
+                term_token: { type: string }
+                definition_token: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  correct: { type: boolean }
+                  correct_count: { type: integer }
+                  wrong_count: { type: integer }
+                  finished: { type: boolean }
+
+  /games/{id}/hint:
+    post:
+      tags: [games]
+      summary: 提示（返回一对未匹配词条的 token）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  term_token: { type: string }
+                  definition_token: { type: string }
+
+  /games/{id}/finish:
+    post:
+      tags: [games]
+      summary: 结算（幂等，重复调用返回已结算结果）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                duration_ms: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_id: { type: string, format: uuid }
+                  duration_ms: { type: integer }
+                  correct_count: { type: integer }
+                  wrong_count: { type: integer }
+                  accuracy: { type: number }
+                  mode: { type: string }
+                  level: { type: integer }
+
+  /stats/contribution:
+    get:
+      tags: [stats]
+      summary: 近 26 周每日练习数据（GitHub 风格热力图）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  days:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date: { type: string, format: date }
+                        sessions: { type: integer }
+                        duration_ms: { type: integer }
+                        accuracy: { type: number }
+
+  /stats/decks/{id}/progress:
+    get:
+      tags: [stats]
+      summary: 单题库练习记录（用时/错误率演进）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  points:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        completed_at: { type: string, format: date-time }
+                        duration_ms: { type: integer }
+                        correct_count: { type: integer }
+                        wrong_count: { type: integer }
+                        error_rate: { type: number }
+
+  /stats/campaign:
+    get:
+      tags: [stats]
+      summary: 闯关最佳成绩
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  levels:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        level: { type: integer }
+                        best_wrong: { type: integer }
+                        best_duration_ms: { type: integer }
+                        completed_at: { type: string, format: date-time }

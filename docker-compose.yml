@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: wordtile
+      POSTGRES_PASSWORD: wordtile
+      POSTGRES_DB: wordtile
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wordtile -d wordtile"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://wordtile:wordtile@postgres:5432/wordtile?sslmode=disable"
+      REDIS_ADDR: "redis:6379"
+      JWT_SECRET: "change-me-in-production"
+      AUTO_MIGRATE: "true"
+      SEED_DEMO: "true"
+      CORS_ORIGINS: "http://localhost:5173,http://localhost:9001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      # 宿主端口 9000：8080/8081 在 Windows Hyper-V 保留端口段内无法绑定
+      - "9000:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "9001:80"
+    restart: unless-stopped
+
+volumes:
+  pgdata:

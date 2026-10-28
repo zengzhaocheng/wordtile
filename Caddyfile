@@ -1,0 +1,21 @@
+# 生产环境反向代理：自动签发并续期 Let's Encrypt 证书
+# 部署前把 DOMAIN 换成你自己的域名（需已解析到本机公网 IP）
+{$DOMAIN} {
+	encode gzip
+
+	# 前端 SPA + nginx 内的 /api 反代
+	reverse_proxy frontend:80
+
+	header {
+		# PWA / 安全相关响应头
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

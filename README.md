@@ -13,6 +13,7 @@
 - [快速开始](#快速开始)
 - [本地开发](#本地开发)
 - [演示账号](#演示账号)
+- [生产部署](#生产部署)
 - [API 摘要](#api-摘要)
 - [Git-like 版本合并模型](#git-like-版本合并模型)
 - [架构与目录结构](#架构与目录结构)
@@ -94,6 +95,53 @@ cd frontend
 npm install
 npm run dev                            # http://localhost:5173
 ```
+
+---
+
+## 生产部署
+
+### 前置：买一台服务器
+
+推荐 **香港/新加坡的轻量云服务器**（2 核 2G 起，约 100–300 元/年）。这两个地区**不需要 ICP 备案**，且国内访问延迟低（30–80ms，选 CN2/GIA 线路更好）。
+
+> 备案规则：ICP 备案的触发条件是**服务器在中国大陆**。服务器在境外（含香港、新加坡、日本、美国，以及 Cloudflare 的免费 `*.pages.dev`）都不需要备案。个人无公司也可以用**个人主体**备案，但个人备案站点不得含经营性/企业性质内容。
+
+想零成本可申请 [Oracle Cloud 永久免费 ARM 实例](https://www.oracle.com/cloud/free/)（4 核 24G，跑这套容器绰绰有余）。
+
+### 部署步骤
+
+```bash
+# 1. 装 Docker（Ubuntu 22.04）
+curl -fsSL https://get.docker.com | sh
+
+# 2. 拉代码
+git clone https://github.com/zengzhaocheng/wordtile.git && cd wordtile
+
+# 3. 配置环境变量（脚本会自动生成随机密钥，只需改域名）
+cp .env.example .env
+vim .env          # 改 DOMAIN 和 CORS_ORIGINS 为你的真实域名
+
+# 4. 一键构建启动
+bash deploy.sh
+```
+
+### 需要改的配置
+
+| 变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| `DOMAIN` | 你的域名，Caddy 用它自动签发 HTTPS 证书 | `wordtile.example.com` |
+| `CORS_ORIGINS` | 允许跨域的来源，多个用逗号分隔 | 仅 localhost |
+| `JWT_SECRET` | **必须改**！生成：`openssl rand -base64 32` | `change-me-in-production` |
+| `POSTGRES_PASSWORD` | 数据库密码，脚本会随机生成 | `wordtile` |
+| `SEED_DEMO` | 是否灌入演示账号与示例题库 | `true` |
+
+生产 compose 与开发版的区别：Postgres/Redis **不映射宿主机端口**（只在容器内网可达），由 Caddy 统一对外，自动签发并续期 Let's Encrypt 证书。
+
+### 关于 Cloudflare
+
+- **前端**可以免费放 Cloudflare Pages（静态资源，全球 CDN）
+- **后端不行**：Workers 是 V8 隔离环境而非容器，跑不了 Go 二进制，也没有原生 TCP 连 Postgres/Redis。要上就得把后端整体重写成 TS（Gin→Hono、GORM→Drizzle、Postgres→D1、Redis→KV）
+- 想在家里/公司机器上零成本暴露服务，可以用 **Cloudflare Tunnel**，但国内访问 Cloudflare 域名不稳定，自用尚可，不适合给国内用户
 
 ---
 

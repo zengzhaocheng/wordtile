@@ -1,6 +1,7 @@
 import axios from "axios";
 
-export const baseURL = import.meta.env.VITE_API_URL ?? "/api/v1";
+// 用 || 而非 ??：构建时若注入空字符串，也能正确回退到同源的 /api/v1
+export const baseURL = import.meta.env.VITE_API_URL || "/api/v1";
 
 export const api = axios.create({ baseURL });
 

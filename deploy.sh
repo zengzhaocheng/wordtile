@@ -17,6 +17,11 @@ fi
 
 echo "==> 准备环境变量 ..."
 if [ ! -f .env ]; then
+  # 如果没提供 .env，先交互式询问域名（支持纯手机/无编辑器环境）
+  if [ -z "${DOMAIN_NAME:-}" ]; then
+    printf "请输入你的域名（例如 wordtile.example.com，没有域名直接回车用 IP 部署）: "
+    read -r DOMAIN_NAME
+  fi
   cp .env.example .env
   # 生成随机密钥
   gen() {
@@ -33,9 +38,25 @@ if [ ! -f .env ]; then
     sed -i "s|请替换成随机32字节字符串|$(gen)|" .env
     sed -i "s|请改成随机强密码|$(gen | tr -d '/+=' | head -c 24)|" .env
   fi
+  if [ -n "$DOMAIN_NAME" ]; then
+    sed -i "s|wordtile.example.com|$DOMAIN_NAME|g" .env
+  fi
   echo "已生成 .env（含随机 JWT_SECRET 与数据库密码）"
 else
   echo ".env 已存在，跳过生成"
+fi
+
+# 内存不足 3G 时加 swap，避免 Go 编译 OOM（2G 小鸡必备）
+MEM_TOTAL_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+if [ "$MEM_TOTAL_KB" -lt 3000000 ] && [ ! -f /swapfile ]; then
+  echo "==> 检测到内存不足 3G，创建 2G swap ..."
+  if fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none; then
+    chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+    grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    echo "swap 已启用并写入 fstab"
+  else
+    echo "警告：swap 创建失败，构建大项目时可能内存不足" >&2
+  fi
 fi
 
 echo "==> 构建并启动服务 ..."

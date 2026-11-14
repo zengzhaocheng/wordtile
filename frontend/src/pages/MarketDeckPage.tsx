@@ -4,14 +4,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { deckApi, marketApi } from "../api/endpoints";
 import { errText } from "../api/client";
 import { useI18n } from "../i18n";
+import { useAuthStore } from "../stores/auth";
+import DeleteDeckControl from "../components/DeleteDeckControl";
 
 export default function MarketDeckPage() {
   const { id } = useParams();
   const { t } = useI18n();
   const nav = useNavigate();
   const qc = useQueryClient();
+  const user = useAuthStore((s) => s.user);
   const [error, setError] = useState("");
   const [comment, setComment] = useState("");
+  const [notice, setNotice] = useState("");
+  const [existingForkId, setExistingForkId] = useState("");
 
   const { data: detail } = useQuery({
     queryKey: ["deckDetail", id],
@@ -34,9 +39,15 @@ export default function MarketDeckPage() {
 
   const fork = useMutation({
     mutationFn: () => marketApi.fork(id!),
-    onSuccess: (deck) => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["myDecks"] });
-      nav(`/decks/${deck.id}`);
+      if (res.existing) {
+        // 幂等：同一用户对同一来源只保留一个副本，不重复创建。
+        setExistingForkId(res.deck.id);
+        setNotice("ℹ️ " + t("deck.forkExisting"));
+        return;
+      }
+      nav(`/decks/${res.deck.id}`);
     },
     onError: (e) => setError(errText(e)),
   });
@@ -57,7 +68,14 @@ export default function MarketDeckPage() {
     <div className="mx-auto max-w-2xl space-y-4 p-4">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-bold">{deck.name}</h1>
+          <h1 className="text-xl font-bold">
+            {deck.name}
+            {deck.archived && (
+              <span className="ml-1 text-xs font-normal text-muted">
+                · {t("deck.archivedBadge")}
+              </span>
+            )}
+          </h1>
           <p className="text-sm text-muted">{deck.description || "—"}</p>
           <p className="mt-1 text-xs text-muted">
             ❤️ {deck.likes_count} · 🍴 {deck.forks_count} · 📚 {detail.entries.length} 词条
@@ -77,13 +95,30 @@ export default function MarketDeckPage() {
           ❤️ {t("action.like")}
         </button>
         <button
-          onClick={() => fork.mutate()}
+          onClick={() => {
+            setNotice("");
+            setExistingForkId("");
+            fork.mutate();
+          }}
           disabled={fork.isPending}
           className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-ink disabled:opacity-50"
         >
           🍴 {t("action.fork")}
         </button>
       </div>
+      {notice && (
+        <div className="rounded-xl border border-primary bg-surface p-3 text-sm">
+          <p>{notice}</p>
+          {existingForkId && (
+            <button
+              onClick={() => nav(`/decks/${existingForkId}`)}
+              className="mt-2 rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-ink"
+            >
+              {t("deck.forkOpenExisting")}
+            </button>
+          )}
+        </div>
+      )}
       {error && <p className="text-sm text-danger">{error}</p>}
 
       {/* 词条预览 */}
@@ -134,6 +169,14 @@ export default function MarketDeckPage() {
           ))}
         </ul>
       </section>
+
+      {/* 市场保留版的原作者仍可彻底删除 */}
+      {deck.archived && user?.id === deck.owner_id && (
+        <section className="rounded-2xl border border-danger bg-surface p-4">
+          <h2 className="mb-2 text-sm font-semibold text-danger">🗑️ {t("deck.delete")}</h2>
+          <DeleteDeckControl deck={deck} onDeleted={() => nav("/market")} />
+        </section>
+      )}
     </div>
   );
 }

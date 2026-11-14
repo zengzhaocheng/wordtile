@@ -31,6 +31,15 @@ export const authApi = {
     api.patch<{ user: User }>("/users/me", body).then((r) => r.data.user),
 };
 
+/** DELETE /decks/:id 的结果 */
+export interface DeleteDeckResult {
+  deleted: boolean;
+  mode: "hard" | "archived";
+  market_removed: boolean;
+  market_retained: boolean;
+  detached_forks: number;
+}
+
 /* ---------- 题库 ---------- */
 export const deckApi = {
   listMine: () => api.get<{ decks: Deck[] }>("/decks").then((r) => r.data.decks),
@@ -39,7 +48,10 @@ export const deckApi = {
   detail: (id: string) => api.get<DeckDetail>(`/decks/${id}`).then((r) => r.data),
   update: (id: string, body: { name?: string; description?: string; visibility?: string }) =>
     api.patch<{ deck: Deck }>(`/decks/${id}`, body).then((r) => r.data.deck),
-  remove: (id: string) => api.delete(`/decks/${id}`),
+  remove: (id: string, removeFromMarket = true) =>
+    api
+      .delete<DeleteDeckResult>(`/decks/${id}`, { params: { remove_from_market: removeFromMarket } })
+      .then((r) => r.data),
   createEntry: (deckId: string, body: { term: string; definition: string; tags: string[] }) =>
     api.post<{ entry: Entry }>(`/decks/${deckId}/entries`, body).then((r) => r.data.entry),
   updateEntry: (entryId: string, body: { term?: string; definition?: string; tags?: string[] }) =>
@@ -64,7 +76,10 @@ export const marketApi = {
       .then((r) => r.data.decks),
   publish: (deckId: string) =>
     api.post<{ deck: Deck }>(`/decks/${deckId}/publish`).then((r) => r.data.deck),
-  fork: (deckId: string) => api.post<{ deck: Deck }>(`/decks/${deckId}/fork`).then((r) => r.data.deck),
+  fork: (deckId: string) =>
+    api
+      .post<{ deck: Deck; created: boolean; existing: boolean }>(`/decks/${deckId}/fork`)
+      .then((r) => r.data),
   like: (deckId: string) =>
     api.post<{ liked: boolean; likes_count: number }>(`/decks/${deckId}/like`).then((r) => r.data),
   comments: (deckId: string) =>

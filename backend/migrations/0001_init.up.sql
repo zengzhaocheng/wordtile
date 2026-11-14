@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS decks (
     forked_from uuid,
     likes_count integer DEFAULT 0,
     forks_count integer DEFAULT 0,
+    archived boolean DEFAULT false,
     pending_merge_source varchar(36),
     pending_merge_base varchar(36),
     created_at timestamptz,

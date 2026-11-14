@@ -180,16 +180,31 @@ bash deploy.sh
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET/POST | `/decks` | `{decks: [...]}` 我的题库 / `{name, description?}` 新建（→ `{deck}`） |
-| GET/PATCH/DELETE | `/decks/:id` | 详情（含词条、origin_head、open_conflicts）/ `{name?, description?, visibility?}` / 删除 |
+| GET/PATCH/DELETE | `/decks/:id` | 详情（含词条、origin_head、open_conflicts）/ `{name?, description?, visibility?}` / 删除：`?remove_from_market=true\|false`（见下） |
 | GET/POST | `/decks/:id/entries` | `{entries: [...]}` / `{term, definition, tags?}` 新增（→ `{entry}`） |
 | PATCH/DELETE | `/entries/:entryId` | `{term?, definition?, tags?}` 修改 / 删除（PRD 规定的顶层路径） |
 | GET | `/decks/:id/export` | 导出题库 JSON 文档（公开题库任何人可导出） |
 | POST | `/decks/import` | 从 JSON 文档**新建**题库 → `201 {deck, imported}` |
 | POST | `/decks/:id/import` | 导入词条到已有题库，`mode: append`（默认）/ `replace` → `{deck_id, imported, mode}` |
 
-题库字段：`id, owner_id, name, description, visibility(public/private), head_commit_id, forked_from, likes_count, forks_count, entry_count, ...`
+题库字段：`id, owner_id, name, description, visibility(public/private), head_commit_id, forked_from, likes_count, forks_count, archived, entry_count, ...`
 
 > 导入导出的完整格式见下方 [题库 JSON 导入 / 导出](#题库-json-导入--导出)。
+
+### 题库删除与 Fork 语义
+
+市场**不是独立副本**：`visibility=public` 的同一条题库记录就是市场里的题库。因此删除时提供两种模式（前端在「我的题库」列表和题库详情页给出勾选，公开题库默认不勾选即保留市场版）：
+
+| `remove_from_market` | 公开题库 | 私有题库 |
+| --- | --- | --- |
+| `true`（默认，兼容旧客户端） | 彻底删除题库、词条、commit、点赞、评论，市场同步下架 | 彻底删除 |
+| `false` | **归档**：只从「我的题库」隐藏（`archived=true`），市场公开版、词条、commit 全部保留 | 彻底删除（本就没有市场版本） |
+
+响应：`{deleted, mode: "hard"|"archived", market_removed, market_retained, detached_forks}`。
+
+**已 Fork 的用户永远不受影响**：Fork 生成的是独立题库行（词条与 commit 都是副本）。彻底删除源题库时，只会把这些副本的 `forked_from` 置空（返回 `detached_forks` 数量），避免悬空引用；副本本身、词条、成绩都继续可用，只是不能再从已删除的源 Pull 更新。选择「保留市场版本」时源记录仍在，既有 fork 连 Pull 都能继续用。归档版仍归原作者所有，作者可在市场详情页彻底删除它。
+
+**Fork 幂等**：同一账号对同一来源只保留一个活跃 fork。重复点击返回 `200 {deck, created:false, existing:true}`，不新建副本、不重复增加 `forks_count`；首次 Fork 返回 `201 {deck, created:true, existing:false}`。已彻底删除或已归档的副本不算「活跃」，可重新 Fork。历史数据中已存在的重复副本不会自动合并。
 
 ### 社区
 
@@ -197,7 +212,7 @@ bash deploy.sh
 | --- | --- | --- |
 | GET | `/marketplace/decks` | 公开市场（无需登录），`?search=&sort=new|likes|forks` → `{decks: [...]}`（Redis 缓存） |
 | POST | `/decks/:id/publish` | 发布/取消发布（visibility 切换） |
-| POST | `/decks/:id/fork` | Fork 到自己名下（保留 LogicalID 与 commit 历史）→ `201 {deck}` |
+| POST | `/decks/:id/fork` | 幂等 Fork 到自己名下（保留 LogicalID 与 commit 历史）→ 首次 `201 {deck, created:true}`，重复 `200 {deck, existing:true}` |
 | POST | `/decks/:id/like` | 点赞/取消 → `{liked, likes_count}` |
 | GET/POST | `/decks/:id/comments` | `{comments: [...]}` / `{content}` 发表评论 |
 
@@ -422,6 +437,8 @@ npm test             # vitest + jsdom
 8. **闯关第 1~3 关试玩**：与 PRD 一致，未登录只能玩前 3 关；本实现中全部对局接口要求登录（简化权限模型），PRD 的"试玩"体现为前端引导注册。
 9. **PWA 图标**为脚本生成的简洁图形占位（`gen_icons.py` 已删除，产物在 `frontend/public/`），正式上线请替换为设计稿。
 10. **未做实时通信（WebSocket）**：PRD 未要求对战/协作实时性，评论与合并均为请求-响应模型。
+11. **删除公开题库默认连市场一起删**：`remove_from_market` 缺省 `true`，保证旧客户端行为不变；「只删我的、保留市场」用 `archived` 标记实现，而不是复制一份市场快照 —— 避免同一内容出现两个 ID、让已有 fork 的来源指针失效。归档版仍归原作者所有，作者可从市场详情页彻底删除。
+12. **Fork 幂等（GitHub 语义）**：同一用户对同一来源只保留一个活跃副本，避免重复副本携带相同 commit hash 集合、虚增 `forks_count`；代价是用户若确实想要第二份独立副本，需先删除或归档已有副本再 Fork。历史上已产生的重复副本不自动合并。
 
 ---
 

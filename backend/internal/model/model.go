@@ -30,6 +30,7 @@ type Deck struct {
 	ForkedFrom         *uuid.UUID `gorm:"type:uuid" json:"forked_from"`                    // fork 来源题库
 	LikesCount         int       `gorm:"default:0" json:"likes_count"`
 	ForksCount         int       `gorm:"default:0" json:"forks_count"`
+	Archived           bool      `gorm:"default:false" json:"archived"` // 已从「我的题库」移除，但市场公开版保留
 	PendingMergeSource *string   `gorm:"size:36" json:"pending_merge_source"` // 待解决的合并来源 commit
 	PendingMergeBase   *string   `gorm:"size:36" json:"pending_merge_base"`   // 待解决合并的 base commit
 	CreatedAt          time.Time `json:"created_at"`

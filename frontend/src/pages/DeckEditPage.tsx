@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { deckApi, versionApi } from "../api/endpoints";
 import { errText } from "../api/client";
 import { useI18n } from "../i18n";
+import DeleteDeckControl from "../components/DeleteDeckControl";
 import type { Entry } from "../types";
 import {
   deckFilename,
@@ -338,6 +339,12 @@ export default function DeckEditPage() {
           </ul>
         </section>
       )}
+
+      {/* 危险操作：删除题库 */}
+      <section className="rounded-2xl border border-line bg-surface p-4">
+        <h2 className="mb-2 text-sm font-semibold text-danger">🗑️ {t("deck.delete")}</h2>
+        <DeleteDeckControl deck={deck} onDeleted={() => nav("/decks")} />
+      </section>
     </div>
   );
 }

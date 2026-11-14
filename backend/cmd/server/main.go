@@ -47,7 +47,7 @@ func main() {
 
 	h := &router.Handlers{
 		Auth:      handler.NewAuthHandler(authSvc),
-		Deck:      handler.NewDeckHandler(deckSvc),
+		Deck:      handler.NewDeckHandler(deckSvc, marketCache),
 		Community: handler.NewCommunityHandler(communitySvc, marketCache),
 		Version:   handler.NewVersionHandler(mergeSvc, deckSvc),
 		Game:      handler.NewGameHandler(gameSvc),

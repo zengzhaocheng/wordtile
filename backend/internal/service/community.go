@@ -28,6 +28,9 @@ func (s *CommunityService) Publish(userID, deckID uuid.UUID) (*model.Deck, error
 	if deck.OwnerID != userID {
 		return nil, apperr.ErrForbidden
 	}
+	if deck.Archived {
+		return nil, apperr.New(400, "该题库已归档为市场公开版，不能再发布")
+	}
 	entries, err := s.repo.ListEntries(deckID)
 	if err != nil {
 		return nil, err
@@ -44,13 +47,24 @@ func (s *CommunityService) Publish(userID, deckID uuid.UUID) (*model.Deck, error
 
 // Fork 将线上题库复制为本地副本：词条沿用 LogicalID，commit 历史原样复制（hash 不变，
 // 因此 fork 与源题库可互相求公共祖先、执行三路合并）。
-func (s *CommunityService) Fork(userID, deckID uuid.UUID) (*model.Deck, error) {
+//
+// 幂等（GitHub 语义）：同一用户对同一来源只保留一个活跃 fork。重复调用返回既有副本、
+// created=false，且不再增加来源题库的 ForksCount。已彻底删除或已归档的副本不算「活跃」。
+func (s *CommunityService) Fork(userID, deckID uuid.UUID) (*model.Deck, bool, error) {
 	origin, err := s.repo.GetDeck(deckID)
 	if err != nil {
-		return nil, apperr.ErrNotFound
+		return nil, false, apperr.ErrNotFound
 	}
 	if origin.Visibility != "public" && origin.OwnerID != userID {
-		return nil, apperr.ErrForbidden
+		return nil, false, apperr.ErrForbidden
+	}
+
+	existing, err := s.repo.FindActiveFork(userID, deckID)
+	if err != nil {
+		return nil, false, err
+	}
+	if existing != nil {
+		return existing, false, nil
 	}
 
 	fork := &model.Deck{
@@ -64,27 +78,27 @@ func (s *CommunityService) Fork(userID, deckID uuid.UUID) (*model.Deck, error) {
 	// 复制词条（保留 LogicalID）
 	entries, err := s.repo.ListEntries(deckID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for _, e := range entries {
 		clone := e
 		clone.ID = uuid.New()
 		clone.DeckID = fork.ID
 		if err := s.repo.CreateEntry(&clone); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	// 复制 commit 历史（保留 hash / seq / parents / createdAt，保证重放顺序与 LCA 匹配）
 	commits, err := s.repo.ListCommits(deckID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for _, c := range commits {
 		cc := c
 		cc.ID = uuid.New()
 		cc.DeckID = fork.ID
 		if err := s.repo.CreateCommit(&cc); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	head := ""
@@ -95,13 +109,13 @@ func (s *CommunityService) Fork(userID, deckID uuid.UUID) (*model.Deck, error) {
 		fork.HeadCommitID = &head
 	}
 	if err := s.repo.CreateDeck(fork); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	origin.ForksCount++
 	if err := s.repo.UpdateDeck(origin); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return fork, nil
+	return fork, true, nil
 }
 
 func (s *CommunityService) ToggleLike(userID, deckID uuid.UUID) (bool, int, error) {

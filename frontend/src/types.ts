@@ -18,6 +18,8 @@ export interface Deck {
   forked_from: string | null;
   likes_count: number;
   forks_count: number;
+  /** 已从「我的题库」移除，但公开版本仍保留在市场 */
+  archived: boolean;
   created_at: string;
   updated_at: string;
 }

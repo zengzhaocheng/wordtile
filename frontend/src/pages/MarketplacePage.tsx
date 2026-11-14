@@ -55,9 +55,16 @@ export default function MarketplacePage() {
               to={`/market/${d.id}`}
               className="block rounded-2xl border border-line bg-surface p-4 active:scale-[0.99]"
             >
-              <div className="flex items-center justify-between">
-                <span className="font-semibold">{d.name}</span>
-                <span className="text-xs text-muted">{d.owner_name}</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold">
+                  {d.name}
+                  {d.archived && (
+                    <span className="ml-1 text-xs font-normal text-muted">
+                      · {t("deck.archivedBadge")}
+                    </span>
+                  )}
+                </span>
+                <span className="shrink-0 text-xs text-muted">{d.owner_name}</span>
               </div>
               <p className="mt-1 line-clamp-2 text-sm text-muted">{d.description || "—"}</p>
               <p className="mt-1 text-xs text-muted">

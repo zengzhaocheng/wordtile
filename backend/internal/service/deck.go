@@ -81,6 +81,9 @@ func (s *DeckService) UpdateDeck(userID, deckID uuid.UUID, name, description, vi
 	if err != nil {
 		return nil, err
 	}
+	if deck.Archived {
+		return nil, apperr.New(400, "该题库已归档为市场公开版，不能再编辑")
+	}
 	if name != nil {
 		if *name == "" {
 			return nil, apperr.New(400, "题库名称不能为空")
@@ -102,11 +105,37 @@ func (s *DeckService) UpdateDeck(userID, deckID uuid.UUID, name, description, vi
 	return deck, nil
 }
 
-func (s *DeckService) DeleteDeck(userID, deckID uuid.UUID) error {
-	if _, err := s.ownedDeck(userID, deckID); err != nil {
-		return err
+// DeleteDeckResult 删除结果。market_retained=true 表示题库已转为市场公开版，
+// 只从「我的题库」移除；detached_forks 是被解除来源指针的已有 fork 数量。
+type DeleteDeckResult struct {
+	Deleted        bool           `json:"deleted"`
+	Mode           DeleteDeckMode `json:"mode"`
+	MarketRemoved  bool           `json:"market_removed"`
+	MarketRetained bool           `json:"market_retained"`
+	DetachedForks  int64          `json:"detached_forks"`
+}
+
+func (s *DeckService) DeleteDeck(userID, deckID uuid.UUID, removeFromMarket bool) (*DeleteDeckResult, error) {
+	deck, err := s.ownedDeck(userID, deckID)
+	if err != nil {
+		return nil, err
 	}
-	return s.repo.DeleteDeckCascade(deckID)
+	if PlanDeckDeletion(deck.Visibility, deck.Archived, removeFromMarket) == DeleteArchived {
+		if err := s.repo.ArchiveDeck(deckID); err != nil {
+			return nil, err
+		}
+		return &DeleteDeckResult{Deleted: true, Mode: DeleteArchived, MarketRetained: true}, nil
+	}
+	detached, err := s.repo.DeleteDeckCascade(deckID)
+	if err != nil {
+		return nil, err
+	}
+	return &DeleteDeckResult{
+		Deleted:       true,
+		Mode:          DeleteHard,
+		MarketRemoved: deck.Visibility == "public",
+		DetachedForks: detached,
+	}, nil
 }
 
 func (s *DeckService) CreateEntry(userID, deckID uuid.UUID, term, definition string, tags []string) (*model.Entry, error) {

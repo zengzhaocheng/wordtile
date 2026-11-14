@@ -53,9 +53,20 @@ components:
         forked_from: { type: string, format: uuid, nullable: true }
         likes_count: { type: integer }
         forks_count: { type: integer }
+        archived: { type: boolean, description: 已从「我的题库」移除，但公开版本仍保留在市场 }
         entry_count: { type: integer }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    DeleteDeckResult:
+      type: object
+      properties:
+        deleted: { type: boolean }
+        mode: { type: string, enum: [hard, archived] }
+        market_removed: { type: boolean }
+        market_retained: { type: boolean }
+        detached_forks:
+          type: integer
+          description: 被解除 forked_from 来源指针的已有 fork 数量（副本本身不受影响）
     DeckDetail:
       allOf:
         - $ref: '#/components/schemas/Deck'
@@ -373,16 +384,19 @@ paths:
                   deck: { $ref: '#/components/schemas/Deck' }
     delete:
       tags: [decks]
-      summary: 删除题库
+      summary: 删除题库（可选择是否同时删除市场版本）
+      parameters:
+        - name: remove_from_market
+          in: query
+          required: false
+          description: 'true（默认）彻底删除含市场版本；false 时公开题库仅归档，市场公开版保留。已 fork 的副本始终不受影响。'
+          schema: { type: boolean, default: true }
       responses:
         '200':
           description: OK
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  deleted: { type: boolean }
+              schema: { $ref: '#/components/schemas/DeleteDeckResult' }
 
   /decks/{id}/entries:
     parameters:
@@ -581,18 +595,30 @@ paths:
   /decks/{id}/fork:
     post:
       tags: [community]
-      summary: Fork 题库（复制词条保留 logical_id + 复制 commit 历史）
+      summary: 幂等 Fork 题库（同一用户+同一来源只保留一个活跃副本；复制 logical_id 与 commit 历史）
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '201':
-          description: Fork 成功
+          description: 首次 Fork，已创建新副本
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   deck: { $ref: '#/components/schemas/Deck' }
+                  created: { type: boolean, example: true }
+                  existing: { type: boolean, example: false }
+        '200':
+          description: 已有活跃 fork，直接返回该副本（不重复创建、不增加 forks_count）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deck: { $ref: '#/components/schemas/Deck' }
+                  created: { type: boolean, example: false }
+                  existing: { type: boolean, example: true }
 
   /decks/{id}/like:
     post:

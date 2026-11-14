@@ -78,13 +78,18 @@ func (h *CommunityHandler) Fork(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "id 格式不合法"})
 		return
 	}
-	fork, err := h.svc.Fork(userID, deckID)
+	fork, created, err := h.svc.Fork(userID, deckID)
 	if err != nil {
 		respondErr(c, err)
 		return
 	}
+	if !created {
+		// 幂等：直接返回已有副本，不再新建、不再增加 ForksCount。
+		c.JSON(http.StatusOK, gin.H{"deck": fork, "created": false, "existing": true})
+		return
+	}
 	h.cache.Invalidate()
-	c.JSON(http.StatusCreated, gin.H{"deck": fork})
+	c.JSON(http.StatusCreated, gin.H{"deck": fork, "created": true, "existing": false})
 }
 
 func (h *CommunityHandler) ToggleLike(c *gin.Context) {

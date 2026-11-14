@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { deckApi } from "../api/endpoints";
 import { errText } from "../api/client";
 import { useI18n } from "../i18n";
+import DeleteDeckControl from "../components/DeleteDeckControl";
 import {
   downloadJson,
   parseDeckJson,
@@ -63,7 +64,7 @@ export default function DecksPage() {
         </div>
       </div>
 
-      {/* 题库市场入口：功能一直存在，这里补一个显眼的入口 */}
+      {/* 题库市场入口 */}
       <button
         onClick={() => nav("/market")}
         className="flex w-full items-center justify-between gap-3 rounded-2xl border-2 border-primary bg-surface p-4 text-left active:scale-[0.99]"
@@ -102,10 +103,10 @@ export default function DecksPage() {
 
       <ul className="space-y-3">
         {decks?.map((d) => (
-          <li key={d.id}>
+          <li key={d.id} className="rounded-2xl border border-line bg-surface p-4">
             <button
               onClick={() => nav(`/decks/${d.id}`)}
-              className="w-full rounded-2xl border border-line bg-surface p-4 text-left active:scale-[0.99]"
+              className="w-full text-left active:scale-[0.99]"
             >
               <div className="flex items-center justify-between">
                 <span className="font-semibold">{d.name}</span>
@@ -118,6 +119,9 @@ export default function DecksPage() {
                 ❤️ {d.likes_count} · 🍴 {d.forks_count}
               </p>
             </button>
+            <div className="mt-2 border-t border-line pt-2">
+              <DeleteDeckControl deck={d} />
+            </div>
           </li>
         ))}
       </ul>

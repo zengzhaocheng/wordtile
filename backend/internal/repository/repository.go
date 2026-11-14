@@ -58,8 +58,19 @@ func (d *DB) GetDeck(id uuid.UUID) (*model.Deck, error) {
 
 func (d *DB) UpdateDeck(deck *model.Deck) error { return d.Save(deck).Error }
 
-func (d *DB) DeleteDeckCascade(deckID uuid.UUID) error {
-	return d.Transaction(func(tx *gorm.DB) error {
+// DeleteDeckCascade 彻底删除题库及其关联数据，返回被解除来源指针的 fork 数量。
+// 已 fork 出去的题库是独立行，不受影响；这里只把它们的 forked_from 置空，
+// 避免悬空引用（Pull 时会得到「缺少来源」而不是 404）。
+func (d *DB) DeleteDeckCascade(deckID uuid.UUID) (int64, error) {
+	var detached int64
+	err := d.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.Deck{}).
+			Where("forked_from = ?", deckID).
+			Update("forked_from", nil)
+		if res.Error != nil {
+			return res.Error
+		}
+		detached = res.RowsAffected
 		for _, m := range []any{&model.Entry{}, &model.Commit{}, &model.Conflict{}, &model.Like{}, &model.Comment{}} {
 			if err := tx.Where("deck_id = ?", deckID).Delete(m).Error; err != nil {
 				return err
@@ -67,11 +78,34 @@ func (d *DB) DeleteDeckCascade(deckID uuid.UUID) error {
 		}
 		return tx.Delete(&model.Deck{}, "id = ?", deckID).Error
 	})
+	return detached, err
+}
+
+// ArchiveDeck 把公开题库从「我的题库」移除，但保留词条、提交历史、点赞与市场可见性。
+func (d *DB) ArchiveDeck(deckID uuid.UUID) error {
+	return d.Model(&model.Deck{}).Where("id = ?", deckID).Update("archived", true).Error
+}
+
+// FindActiveFork 查找某用户对某来源的活跃 fork（幂等 Fork 用）。
+func (d *DB) FindActiveFork(ownerID, sourceID uuid.UUID) (*model.Deck, error) {
+	var deck model.Deck
+	err := d.Where(
+		"owner_id = ? AND forked_from = ? AND COALESCE(archived, false) = false",
+		ownerID, sourceID,
+	).Order("created_at DESC").First(&deck).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &deck, nil
 }
 
 func (d *DB) ListDecksByOwner(ownerID uuid.UUID) ([]model.Deck, error) {
 	var decks []model.Deck
-	err := d.Where("owner_id = ?", ownerID).Order("updated_at DESC").Find(&decks).Error
+	err := d.Where("owner_id = ? AND COALESCE(archived, false) = false", ownerID).
+		Order("updated_at DESC").Find(&decks).Error
 	return decks, err
 }
 

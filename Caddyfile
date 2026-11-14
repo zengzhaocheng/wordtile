@@ -1,6 +1,10 @@
 # 生产环境反向代理：自动签发并续期 Let's Encrypt 证书
 # 部署前把 DOMAIN 换成你自己的域名（需已解析到本机公网 IP）
-{$DOMAIN} {
+{$DOMAIN}, www.{$DOMAIN} {
+	# www 统一跳转到裸域（SEO 归一），两个域名共用同一张证书
+	@www host www.{$DOMAIN}
+	redir @www https://{$DOMAIN}{uri} permanent
+
 	encode gzip
 
 	# 前端 SPA + nginx 内的 /api 反代

@@ -4,13 +4,12 @@ import (
 	"testing"
 
 	"github.com/wordtile/backend/internal/config"
-	"github.com/wordtile/backend/internal/handler"
 )
 
 // 静态路由 /decks/import 与参数路由 /decks/:id 共存时，gin 旧版本会 panic。
 // 此测试保证路由树可以正常构建，且三个导入导出端点都已注册。
 func TestImportExportRoutesRegistered(t *testing.T) {
-	r := New(&handler.Handlers{}, &config.Config{CORSOrigins: "*", JWTSecret: "test-secret"})
+	r := New(&Handlers{}, &config.Config{CORSOrigins: "*", JWTSecret: "test-secret"})
 	want := map[string]bool{
 		"POST /api/v1/decks/import":     false,
 		"POST /api/v1/decks/:id/import": false,

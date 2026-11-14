@@ -148,6 +148,34 @@ func (d *DB) DeleteEntryByLogicalID(deckID, logicalID uuid.UUID) error {
 	return d.Where("deck_id = ? AND logical_id = ?", deckID, logicalID).Delete(&model.Entry{}).Error
 }
 
+// CreateDeckWithEntries 在单个事务里创建题库及其全部词条（JSON 导入新建题库用）。
+func (d *DB) CreateDeckWithEntries(deck *model.Deck, entries []model.Entry) error {
+	return d.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(deck).Error; err != nil {
+			return err
+		}
+		if len(entries) == 0 {
+			return nil
+		}
+		return tx.CreateInBatches(entries, 200).Error
+	})
+}
+
+// ImportEntries 批量写词库；replace=true 时先清空该题库的原有词条（JSON 导入已有题库用）。
+func (d *DB) ImportEntries(deckID uuid.UUID, entries []model.Entry, replace bool) error {
+	return d.Transaction(func(tx *gorm.DB) error {
+		if replace {
+			if err := tx.Where("deck_id = ?", deckID).Delete(&model.Entry{}).Error; err != nil {
+				return err
+			}
+		}
+		if len(entries) == 0 {
+			return nil
+		}
+		return tx.CreateInBatches(entries, 200).Error
+	})
+}
+
 /* ---------- Commits ---------- */
 
 func (d *DB) CreateCommit(c *model.Commit) error { return d.Create(c).Error }

@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"github.com/wordtile/backend/internal/auth"
+	"github.com/wordtile/backend/internal/deckio"
 	"github.com/wordtile/backend/internal/service"
 )
 
@@ -212,4 +214,90 @@ func (h *DeckHandler) DeleteEntry(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
+/* ---------- JSON 导入 / 导出 ---------- */
+
+// readImportBody 读取并限制导入文件体积（8 MiB）。
+func readImportBody(c *gin.Context) ([]byte, bool) {
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, 8<<20))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "读取请求体失败"})
+		return nil, false
+	}
+	return body, true
+}
+
+// ExportDeck GET /decks/:id/export → 题库 JSON 文档。
+func (h *DeckHandler) ExportDeck(c *gin.Context) {
+	userID, err := auth.UserID(c)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	deckID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 格式不合法"})
+		return
+	}
+	f, err := h.svc.ExportDeck(userID, deckID)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	c.Header("Content-Disposition", "attachment; filename=\"wordtile-deck-"+deckID.String()[:8]+".json\"")
+	c.JSON(http.StatusOK, f)
+}
+
+// ImportNewDeck POST /decks/import → 从 JSON 文档创建新题库。
+func (h *DeckHandler) ImportNewDeck(c *gin.Context) {
+	userID, err := auth.UserID(c)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	body, ok := readImportBody(c)
+	if !ok {
+		return
+	}
+	f, err := deckio.Parse(body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	deck, err := h.svc.ImportNewDeck(userID, f)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"deck": deck, "imported": len(f.Entries)})
+}
+
+// ImportIntoDeck POST /decks/:id/import → 导入词条到已有题库（append / replace）。
+func (h *DeckHandler) ImportIntoDeck(c *gin.Context) {
+	userID, err := auth.UserID(c)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	deckID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 格式不合法"})
+		return
+	}
+	body, ok := readImportBody(c)
+	if !ok {
+		return
+	}
+	f, mode, err := deckio.ParseImport(body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	n, err := h.svc.ImportIntoDeck(userID, deckID, f, mode == "replace")
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deck_id": deckID, "imported": n, "mode": mode})
 }

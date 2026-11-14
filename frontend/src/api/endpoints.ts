@@ -1,4 +1,5 @@
 import { api } from "./client";
+import type { DeckJsonFile } from "../utils/deckJson";
 import type {
   AuthResponse,
   CampaignStat,
@@ -44,6 +45,15 @@ export const deckApi = {
   updateEntry: (entryId: string, body: { term?: string; definition?: string; tags?: string[] }) =>
     api.patch<{ entry: Entry }>(`/entries/${entryId}`, body).then((r) => r.data.entry),
   deleteEntry: (entryId: string) => api.delete(`/entries/${entryId}`),
+
+  /* ---------- JSON 导入 / 导出 ---------- */
+  exportDeck: (id: string) => api.get<DeckJsonFile>(`/decks/${id}/export`).then((r) => r.data),
+  importNewDeck: (body: DeckJsonFile) =>
+    api.post<{ deck: Deck; imported: number }>("/decks/import", body).then((r) => r.data),
+  importIntoDeck: (id: string, body: DeckJsonFile & { mode: "append" | "replace" }) =>
+    api
+      .post<{ deck_id: string; imported: number; mode: string }>(`/decks/${id}/import`, body)
+      .then((r) => r.data),
 };
 
 /* ---------- 社区 ---------- */

@@ -20,6 +20,13 @@ export default function MarketplacePage() {
     <div className="mx-auto max-w-2xl space-y-4 p-4">
       <h1 className="text-xl font-bold">🌐 {t("market.title")}</h1>
 
+      <Link
+        to="/decks"
+        className="block rounded-xl border border-line bg-surface px-3 py-2 text-xs text-muted"
+      >
+        💡 {t("deck.marketEntryDesc")} · {t("action.publish")} → {t("deck.title")}
+      </Link>
+
       <div className="flex gap-2">
         <input
           value={search}

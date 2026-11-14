@@ -51,5 +51,7 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["src/test/setup.ts"],
+    // 部分 Windows 环境下并发 worker 写临时缓存会 EPERM，串行收集更稳
+    fileParallelism: false,
   },
 });

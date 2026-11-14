@@ -78,6 +78,34 @@ components:
         tags: { type: array, items: { type: string } }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    DeckJsonEntry:
+      type: object
+      required: [term, definition]
+      properties:
+        term: { type: string, maxLength: 200 }
+        definition: { type: string, maxLength: 1000 }
+        tags:
+          type: array
+          maxItems: 20
+          items: { type: string, maxLength: 50 }
+    DeckJsonFile:
+      type: object
+      description: |
+        题库交换格式 v1。只有 entries 必填；也接受顶层直接是 DeckJsonEntry 数组。
+        导入已有题库时可附加 mode: append（默认）| replace。
+      required: [entries]
+      properties:
+        format: { type: string, example: wordtile-deck }
+        version: { type: integer, example: 1 }
+        name: { type: string, description: 仅从 JSON 新建题库时生效 }
+        description: { type: string }
+        exported_at: { type: string, format: date-time }
+        mode: { type: string, enum: [append, replace], description: 仅 POST /decks/{id}/import 使用 }
+        entries:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/DeckJsonEntry' }
     Commit:
       type: object
       properties:
@@ -396,6 +424,84 @@ paths:
                 type: object
                 properties:
                   entry: { $ref: '#/components/schemas/Entry' }
+
+  /decks/import:
+    post:
+      tags: [decks]
+      summary: 从 JSON 文档新建题库（单事务写入全部词条）
+      description: |
+        name 缺省时为「导入题库」；新建的题库默认 private。
+        文件里的 name / description 会作为新题库的元信息。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeckJsonFile' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deck: { $ref: '#/components/schemas/Deck' }
+                  imported: { type: integer, description: 导入的词条数 }
+        '400':
+          description: JSON 格式或字段校验失败
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /decks/{id}/export:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [decks]
+      summary: 导出题库为 JSON 文档
+      description: 公开题库任何人可导出；私有题库仅所有者。响应带 Content-Disposition: attachment。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeckJsonFile' }
+        '403':
+          description: 私有题库且非所有者
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /decks/{id}/import:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [decks]
+      summary: 导入词条到已有题库（append / replace）
+      description: |
+        append 追加；replace 先清空该题库全部词条再写入（单事务）。
+        文件里的 name / description 被忽略。导入的词条会生成新的 LogicalID。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeckJsonFile' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deck_id: { type: string, format: uuid }
+                  imported: { type: integer }
+                  mode: { type: string, enum: [append, replace] }
+        '400':
+          description: JSON 格式、字段或 mode 校验失败
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /entries/{entryId}:
     parameters:

@@ -74,12 +74,16 @@ func New(h *Handlers, cfg *config.Config) *gin.Engine {
 	{
 		decks.GET("", h.Deck.List)
 		decks.POST("", h.Deck.Create)
+		// 静态路由须与 /:id 共存；gin v1.10 支持同层 static + param
+		decks.POST("/import", h.Deck.ImportNewDeck)
 		decks.GET("/:id", h.Deck.GetDetail)
 		decks.PATCH("/:id", h.Deck.Update)
 		decks.DELETE("/:id", h.Deck.Delete)
 
 		decks.GET("/:id/entries", h.Deck.ListEntries)
 		decks.POST("/:id/entries", h.Deck.CreateEntry)
+		decks.GET("/:id/export", h.Deck.ExportDeck)
+		decks.POST("/:id/import", h.Deck.ImportIntoDeck)
 
 		decks.POST("/:id/publish", h.Community.Publish)
 		decks.POST("/:id/fork", h.Community.Fork)

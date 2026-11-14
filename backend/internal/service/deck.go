@@ -4,6 +4,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/wordtile/backend/internal/apperr"
+	"github.com/wordtile/backend/internal/deckio"
 	"github.com/wordtile/backend/internal/model"
 	"github.com/wordtile/backend/internal/repository"
 )
@@ -174,4 +175,68 @@ func (s *DeckService) ListCommits(userID, deckID uuid.UUID) ([]model.Commit, err
 		return nil, apperr.ErrForbidden
 	}
 	return s.repo.ListCommits(deckID)
+}
+
+/* ---------- JSON 导入 / 导出 ---------- */
+
+// ExportDeck 把题库导出为可交换的 JSON 文档。公开题库任何人可导出，私有题库仅所有者。
+func (s *DeckService) ExportDeck(userID, deckID uuid.UUID) (*deckio.DeckFile, error) {
+	deck, err := s.repo.GetDeck(deckID)
+	if err != nil {
+		return nil, apperr.ErrNotFound
+	}
+	if deck.Visibility != "public" && deck.OwnerID != userID {
+		return nil, apperr.ErrForbidden
+	}
+	entries, err := s.repo.ListEntries(deckID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]deckio.EntryItem, 0, len(entries))
+	for _, e := range entries {
+		items = append(items, deckio.EntryItem{Term: e.Term, Definition: e.Definition, Tags: e.Tags})
+	}
+	f := deckio.NewExport(deck.Name, deck.Description, items)
+	return &f, nil
+}
+
+// ImportNewDeck 从 JSON 文档创建一个全新的私有题库（含全部词条，单事务）。
+func (s *DeckService) ImportNewDeck(userID uuid.UUID, f *deckio.DeckFile) (*model.Deck, error) {
+	name := f.Name
+	if name == "" {
+		name = "导入题库"
+	}
+	deck := &model.Deck{
+		ID: uuid.New(), OwnerID: userID, Name: name,
+		Description: f.Description, Visibility: "private",
+	}
+	if err := s.repo.CreateDeckWithEntries(deck, toModelEntries(deck.ID, f.Entries)); err != nil {
+		return nil, err
+	}
+	return deck, nil
+}
+
+// ImportIntoDeck 把词条导入已有题库。replace=true 会清空原词条；否则追加。
+// 注意：JSON 文件里的 name / description 在导入已有题库时被忽略。
+func (s *DeckService) ImportIntoDeck(userID, deckID uuid.UUID, f *deckio.DeckFile, replace bool) (int, error) {
+	if _, err := s.ownedDeck(userID, deckID); err != nil {
+		return 0, err
+	}
+	entries := toModelEntries(deckID, f.Entries)
+	if err := s.repo.ImportEntries(deckID, entries, replace); err != nil {
+		return 0, err
+	}
+	return len(entries), nil
+}
+
+// toModelEntries 为每条导入词条生成新的行 ID 与 LogicalID，保证 Git-like 合并键唯一。
+func toModelEntries(deckID uuid.UUID, items []deckio.EntryItem) []model.Entry {
+	out := make([]model.Entry, 0, len(items))
+	for _, it := range items {
+		out = append(out, model.Entry{
+			ID: uuid.New(), DeckID: deckID, LogicalID: uuid.New(),
+			Term: it.Term, Definition: it.Definition, Tags: it.Tags,
+		})
+	}
+	return out
 }

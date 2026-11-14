@@ -1,10 +1,17 @@
-import { useState } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { deckApi, versionApi } from "../api/endpoints";
 import { errText } from "../api/client";
 import { useI18n } from "../i18n";
 import type { Entry } from "../types";
+import {
+  deckFilename,
+  downloadJson,
+  parseDeckJson,
+  toDeckJson,
+  type DeckJsonFile,
+} from "../utils/deckJson";
 
 export default function DeckEditPage() {
   const { id } = useParams();
@@ -14,6 +21,8 @@ export default function DeckEditPage() {
   const qc = useQueryClient();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [mode, setMode] = useState<"append" | "replace">("append");
+  const fileRef = useRef<HTMLInputElement>(null);
 
   // 新建表单状态
   const [name, setName] = useState("");
@@ -100,6 +109,40 @@ export default function DeckEditPage() {
     },
     onError: (e) => setError(errText(e)),
   });
+
+  const exportDeck = useMutation({
+    mutationFn: () => deckApi.exportDeck(id!),
+    onSuccess: (file) => {
+      downloadJson(file, deckFilename(detail?.deck.name ?? "wordtile-deck"));
+      setNotice("✅ " + t("deck.exportSuccess"));
+    },
+    onError: (e) => setError(errText(e)),
+  });
+
+  const importInto = useMutation({
+    mutationFn: (body: DeckJsonFile & { mode: "append" | "replace" }) =>
+      deckApi.importIntoDeck(id!, body),
+    onSuccess: (res) => {
+      setNotice("✅ " + t("deck.importSuccess", { n: res.imported }));
+      invalidate();
+    },
+    onError: (e) => setError(errText(e)),
+  });
+
+  const onPickFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setError("");
+    setNotice("");
+    try {
+      const parsed = parseDeckJson(await file.text());
+      if (mode === "replace" && !window.confirm(t("deck.importConfirmReplace"))) return;
+      importInto.mutate({ ...toDeckJson(parsed), mode });
+    } catch (err) {
+      setError(`${t("deck.importFailed")}: ${(err as Error).message}`);
+    }
+  };
 
   if (isNew) {
     return (
@@ -192,6 +235,43 @@ export default function DeckEditPage() {
           </button>
         )}
       </div>
+
+      {/* JSON 导入 / 导出 */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface p-3">
+        <button
+          onClick={() => exportDeck.mutate()}
+          disabled={exportDeck.isPending}
+          className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
+        >
+          ⬇️ {t("deck.export")}
+        </button>
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={importInto.isPending}
+          className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
+        >
+          ⬆️ {t("deck.importInto")}
+        </button>
+        <label className="flex items-center gap-1 text-xs text-muted">
+          {t("deck.importMode")}
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as "append" | "replace")}
+            className="rounded-lg border border-line bg-bg px-2 py-1.5 text-sm"
+          >
+            <option value="append">{t("deck.importAppend")}</option>
+            <option value="replace">{t("deck.importReplace")}</option>
+          </select>
+        </label>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".json,application/json"
+          onChange={onPickFile}
+          className="hidden"
+        />
+      </div>
+
       {notice && <p className="text-sm text-success">{notice}</p>}
       {error && <p className="text-sm text-danger">{error}</p>}
       {deck.head_commit_id && <p className="text-xs text-muted">{t("deck.uncommitted")}</p>}

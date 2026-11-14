@@ -15,6 +15,7 @@
 - [演示账号](#演示账号)
 - [生产部署](#生产部署)
 - [API 摘要](#api-摘要)
+- [题库 JSON 导入 / 导出](#题库-json-导入--导出)
 - [Git-like 版本合并模型](#git-like-版本合并模型)
 - [架构与目录结构](#架构与目录结构)
 - [测试](#测试)
@@ -182,8 +183,13 @@ bash deploy.sh
 | GET/PATCH/DELETE | `/decks/:id` | 详情（含词条、origin_head、open_conflicts）/ `{name?, description?, visibility?}` / 删除 |
 | GET/POST | `/decks/:id/entries` | `{entries: [...]}` / `{term, definition, tags?}` 新增（→ `{entry}`） |
 | PATCH/DELETE | `/entries/:entryId` | `{term?, definition?, tags?}` 修改 / 删除（PRD 规定的顶层路径） |
+| GET | `/decks/:id/export` | 导出题库 JSON 文档（公开题库任何人可导出） |
+| POST | `/decks/import` | 从 JSON 文档**新建**题库 → `201 {deck, imported}` |
+| POST | `/decks/:id/import` | 导入词条到已有题库，`mode: append`（默认）/ `replace` → `{deck_id, imported, mode}` |
 
 题库字段：`id, owner_id, name, description, visibility(public/private), head_commit_id, forked_from, likes_count, forks_count, entry_count, ...`
+
+> 导入导出的完整格式见下方 [题库 JSON 导入 / 导出](#题库-json-导入--导出)。
 
 ### 社区
 
@@ -221,6 +227,80 @@ bash deploy.sh
 | GET | `/stats/contribution` | `{days: [{date, sessions, duration_ms, accuracy}]}` 近 26 周（热力图数据） |
 | GET | `/stats/decks/:id/progress` | `{points: [{completed_at, duration_ms, correct_count, wrong_count, error_rate}]}` |
 | GET | `/stats/campaign` | `{levels: [...]}` 闯关最佳成绩 |
+
+---
+
+## 题库 JSON 导入 / 导出
+
+不用在界面上一条条点。可以用脚本、Excel、Anki、LLM 等外部工具生成 JSON，一次导入整份题库；也可以把已有题库导出成 JSON 备份或分享。
+
+### 入口
+
+| 想做的事 | 在哪操作 |
+| --- | --- |
+| 从 JSON 新建题库 | 「我的题库」页 → **导入 JSON**（可先点「下载模板」） |
+| 追加 / 替换某个题库的词条 | 进入该题库 → **导入词条** + 选择「追加」或「替换」 |
+| 备份 / 分享题库 | 进入该题库 → **导出 JSON**（浏览器下载文件） |
+| 逛别人公开的题库 | 底部导航 **🌐 市场**，或「我的题库」页顶部的题库市场卡片 |
+
+### 文件格式（v1）
+
+最小可用文件——只有 `entries` 是必填的：
+
+```json
+{
+  "entries": [
+    { "term": "apple", "definition": "苹果" },
+    { "term": "travel", "definition": "旅行", "tags": ["旅游"] }
+  ]
+}
+```
+
+也接受**纯数组**（适合脚本直接生成）：
+
+```json
+[
+  { "term": "apple", "definition": "苹果" },
+  { "term": "banana", "definition": "香蕉" }
+]
+```
+
+导出的文件带完整元信息：
+
+```json
+{
+  "format": "wordtile-deck",
+  "version": 1,
+  "name": "基础英语词汇",
+  "description": "示例题库",
+  "exported_at": "2026-11-15T00:00:00Z",
+  "entries": [
+    { "term": "apple", "definition": "苹果", "tags": ["食物", "水果"] }
+  ]
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `entries` | 是 | 词条数组，至少 1 条，最多 5000 条 |
+| `entries[].term` | 是 | 词条文本，去首尾空白后非空，≤200 字 |
+| `entries[].definition` | 是 | 释义文本，同上，≤1000 字 |
+| `entries[].tags` | 否 | 字符串数组，最多 20 个、每个 ≤50 字；空标签自动丢弃 |
+| `name` / `description` | 否 | 仅「从 JSON 新建题库」时生效；导入已有题库时忽略 |
+| `format` / `version` | 否 | 省略即可；存在时会校验，`format` 必须为 `wordtile-deck`，`version` 不得大于 1 |
+| `mode` | 否 | 仅 `POST /decks/:id/import` 使用：`append`（默认）或 `replace` |
+
+`replace` 会清空该题库原有词条后再写入，前端会二次确认。
+
+### 与 Git-like 版本模型的关系
+
+导入的每条词条都会生成新的 `LogicalID`，所以对版本系统而言这是一次「全量新增」：
+
+- **追加**导入 → 下次 commit 记录为 N 条 added
+- **替换**导入 → 下次 commit 记录为旧词条 removed + 新词条 added（不是就地修改）
+- 因此**不要指望用 JSON 导入去「更新」某个已有词条**。要改内容请用界面编辑，或走 commit + Pull 合并，那样才能保留合并语义
+
+导入与新建题库都在**单个事务**内完成，失败不会留下半份题库；导入请求体上限 8 MiB。校验规则由 `backend/internal/deckio`（服务端）与 `frontend/src/utils/deckJson.ts`（浏览器）双重实现，并有单元测试覆盖。
 
 ---
 

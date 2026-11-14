@@ -4,13 +4,13 @@ import { useAuthStore } from "../stores/auth";
 import { useThemeStore } from "../stores/theme";
 import type { ReactNode } from "react";
 
-const navItems: { to: string; key: I18nKey }[] = [
-  { to: "/", key: "nav.home" },
-  { to: "/play", key: "nav.play" },
-  { to: "/campaign", key: "nav.campaign" },
-  { to: "/decks", key: "nav.decks" },
-  { to: "/market", key: "nav.market" },
-  { to: "/stats", key: "nav.stats" },
+const navItems: { to: string; key: I18nKey; icon: string }[] = [
+  { to: "/", key: "nav.home", icon: "🏠" },
+  { to: "/play", key: "nav.play", icon: "🎮" },
+  { to: "/campaign", key: "nav.campaign", icon: "🏆" },
+  { to: "/decks", key: "nav.decks", icon: "📚" },
+  { to: "/market", key: "nav.market", icon: "🌐" },
+  { to: "/stats", key: "nav.stats", icon: "📊" },
 ];
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -71,11 +71,14 @@ export default function Layout({ children }: { children: ReactNode }) {
                 to={item.to}
                 end={item.to === "/"}
                 className={({ isActive }) =>
-                  `flex flex-col items-center py-2 text-[11px] ${
+                  `flex flex-col items-center gap-0.5 py-2 text-[11px] ${
                     isActive ? "font-semibold text-primary" : "text-muted"
                   }`
                 }
               >
+                <span aria-hidden className="text-base leading-none">
+                  {item.icon}
+                </span>
                 {t(item.key)}
               </NavLink>
             </li>
